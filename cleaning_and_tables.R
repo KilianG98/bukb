@@ -8,7 +8,7 @@ libs()
 df <- read.csv("data_w_cancer.csv")
 cnames<- read.table("new_vars_names")
 
-cancer_vars <- c("obesity_cancer>", "all_cancer", "breast_post", "crc", "esophagus", "pancreas", "endometrial", "ovary", "kidney",
+cancer_vars <- c("obesity_cancer", "all_cancer", "breast_post", "crc", "esophagus", "pancreas", "endometrial", "ovary", "kidney",
 																	"hepatocellular", "thyroid","gallbladder", "intrahep_bile_duct","multiple_myeloma",
 																	 "gastric_cardia", "meningioma")
 #write colnames to df
@@ -19,7 +19,7 @@ all_vars <- c("tbili", "bmi_m", "waist_c", "height", "age_rec", "alc_stat", "smo
 										"pa_min_per_week_MET", "college_degree", "score_diet", "ever_hrt")
 cats <- c( "alc_stat", "smoke_stat", "qualifications")
 
-df$college_degree <- ifelse(grepl("College or University degree", df$qualifications), 1, 0)
+df$college_degree <- as.logical(ifelse(grepl("College or University degree", df$qualifications), 1, 0))
 
 df$inclusion_cancer[is.na(df$inclusion_cancer)] <- 1
 #mark non-answer to cats as missing
@@ -41,7 +41,12 @@ for (var in all_vars) {
 	df <- df[complete.cases(df[[var]]), ]
 	removed_n <- i_rows - nrow(df)
 	cat("Removed", removed_n, "participants due to missing", var, "\n")
-	
+	if (var == "bmi_m") {
+		i_rows <- nrow(df)
+		df <- df[df$bmi_m >= 16, ]
+		removed_n <- i_rows - nrow(df)
+		cat("Removed", removed_n, "participants due to low_bmi\n")
+	}
 	# Special condition for 'waist_c'
 	if (var == "waist_c") {
 		i_rows <- nrow(df)
@@ -50,29 +55,37 @@ for (var in all_vars) {
 		cat("Removed", removed_n, "participants due to cancer\n")
 	}
 }
+
 i_rows <- nrow(df)
 df<- df[complete.cases(df$qualifications), ]
 removed_n <- i_rows - nrow(df)
 cat("Removed", removed_n, "participants due to missing quali\n")
 
 i_rows <- nrow(df)
+
+df$ever_hrt[df$ever_hrt %in% c("Prefer not to answer", "", "Do not know")] <- NA
 df <- df %>%
-	filter((sex == "Female" & ever_hrt != "") | sex == "Male")
+	filter((sex == "Female" & !is.na(ever_hrt)) | sex == "Male")
+df$ever_hrt <- df$ever_hrt == "Yes"
+
 removed_n <- i_rows - nrow(df)
 cat("Removed", removed_n, "participants due to missing hrt\n")
+nrow(df)
 
 df <- get_cat_vars(df)
 df <- get_cancer_vars(df)
 
+for (var in cancer_vars){
+	df[[var]] <- as.logical(df[[var]])
+}
+
 df<- get_labels(df)
 
 table_specs <- list(
-	list(name = "table_one_bmi_m", sex = "Male", stratify_var = "bmi_cat"),
-	list(name = "table_one_bmi_f", sex = "Female", stratify_var = "bmi_cat"),
-	list(name = "table_one_bmigs_m", sex = "Male", stratify_var = "bmi_bil_cat"),
-	list(name = "table_one_bmigs_f", sex = "Female", stratify_var = "bmi_bil_cat"),
-	list(name = "table_one_bmigs1_m", sex = "Male", stratify_var = "bmi_bil_cat2"),
-	list(name = "table_one_bmigs1_f", sex = "Female", stratify_var = "bmi_bil_cat2")
+	list(name = "table_one1_bmi_m", sex = "Male", stratify_var = "bmi_cat"),
+	list(name = "table_one1_bmi_f", sex = "Female", stratify_var = "bmi_cat"),
+	list(name = "table_one1_bmigs1_m", sex = "Male", stratify_var = "bmi_bil_cat2"),
+	list(name = "table_one1_bmigs1_f", sex = "Female", stratify_var = "bmi_bil_cat2")
 )
 
 # Create and store tables dynamically
@@ -81,12 +94,12 @@ for (spec in table_specs) {
 	tables_list[[spec$name]] <- generate_table(df, spec$sex, spec$stratify_var, all_vars, cancer_vars)
 }
 
-
-
-
+for (name in names(tables_list)){
+	write.csv(tables_list[[name]], paste0("../results/",name, ".csv"), row.names = FALSE)
+}
 
 saveRDS(df, "working_file.rds")
-saveRDS(df1, "working_file_missing.rds")
+#saveRDS(df1, "working_file_missing.rds")
 
 
 # old code ------------------------------------------------------------------------------------

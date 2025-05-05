@@ -30,7 +30,7 @@ get_cancer_vars <- function(df){
 	df$endometrial <- 0
 	df$ovary <- 0
 	#sum
-	df$homrmonal <-0
+	df$hormonal <-0
 	df$obesity_non_hormonal <- 0
 	df$obesity_cancer <- 0
 	df$all_cancer <- 0
@@ -203,6 +203,10 @@ generate_table <- function(data, sex, stratify_var, row_vars,cancer_vars) {
     paste(cancer_vars[!cancer_vars %in% c("breast_pre", "breast_post", "endometrial", "ovary")], collapse = " + ")
   } else {
     paste(cancer_vars[cancer_vars != "prostate"], collapse = " + ")
+  }
+  
+  if (sex == "Male"){
+  	row_vars <- row_vars[row_vars != "ever_hrt"]
   }
   
   # Define table formulas dynamically

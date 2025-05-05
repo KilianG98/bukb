@@ -23,6 +23,9 @@ prepare_data <- function(data_file) {
 															"esophagus",	"kidney","hepatocellular",  "thyroid","gallbladder", "intrahep_bile_duct",  "multiple_myeloma")
 	cancers_m <- c("obesity_cancer", "all_cancer", "crc",  "pancreas", "kidney","hepatocellular",  "thyroid","gallbladder", "intrahep_bile_duct",  "multiple_myeloma", "esophagus")
 	
+	for (canc in cancers_f){
+		df[[canc]] <- as.numeric(df[[canc]])
+	}
 	# Store cancer outcome lists in a list so that they can be selected later by sex
 	cancers <- list(Female = cancers_f, Male = cancers_m)
 	
@@ -31,6 +34,10 @@ prepare_data <- function(data_file) {
 		group_by(sex) %>%
 		mutate(pa_min_per_week_MET_sd = pa_min_per_week_MET / sd(pa_min_per_week_MET, na.rm = TRUE)) %>%
 		ungroup()
+	
+	print(nrow(df))
+	df <- df[df$ala_trans >= 7 & df$ala_trans <= 55 & df$asp_trans >= 8 & df$asp_trans <= 48 & df$gglut_trans >= 8 & df$gglut_trans <= 61, ]
+	print(nrow(df))
 	
 	df$date_recruit <- as.Date(as.character(df$date_recruit), format = "%Y-%m-%d")
 	df$date_exit_first_cancer <- as.Date(as.character(df$date_exit_first_cancer), format = "%Y-%m-%d")
@@ -105,9 +112,79 @@ prepare_data <- function(data_file) {
 			)
 		)
 	
+	
+	
+	tbili_tertile_m <- quantile(df_m$tbili, probs = c(1/3, 2/3), na.rm = TRUE)
+	tbili_tertile_f <- quantile(df_f$tbili, probs = c(1/3, 2/3), na.rm = TRUE)
+	
+	cat("tertile:", tbili_tertile_f, tbili_tertile_m)
+	
+	df_m <- df_m %>%
+		mutate(
+			bmi_bil_cat_tert = factor(
+				case_when(
+					bmi_m >= 16 & bmi_m < 25 ~ 1,
+					bmi_m >=25 & tbili < tbili_tertile_m[2] ~ 2,
+					bmi_m >= 25 & tbili >= tbili_tertile_m[2] & tbili < 25 ~ 3,
+					TRUE ~ 9
+				),
+				levels = c(1, 2, 3, 9),
+				labels = c("Normal weights", "Overweight non-GS", "Overweight GS", "????")
+			)
+		)
+	
+	df_f <- df_f %>%
+		mutate(
+			bmi_bil_cat_tert = factor(
+				case_when(
+					bmi_m >= 16 & bmi_m < 25 ~ 1,
+					bmi_m >=25 & tbili < tbili_tertile_f[2] ~ 2,
+					bmi_m >= 25 & tbili >= tbili_tertile_f[2] & tbili < 25 ~ 3,
+					TRUE ~ 9
+				),
+				levels = c(1, 2, 3, 9),
+				labels = c("Normal weights", "Overweight non-GS", "Overweight GS", "????")
+			)
+		)
+	
+	df_f <- df_f %>%
+		mutate(
+			bmi_bil_cat_alt = factor(
+				case_when(
+					bmi_m >= 16 & bmi_m < 25 & ala_trans < 35 ~ 1 ,
+					bmi_m >=25 & tbili < 10 & ala_trans < 35 ~ 2 ,
+					bmi_m >= 25 & tbili >= 10 & ala_trans < 35 ~ 3,
+					TRUE ~ 9
+				),
+				levels = c(1, 2, 3, 9),
+				labels = c("Normal weights", "Overweight non-GS", "Overweight GS", "????")
+			)
+		)
+	
+	df_m <- df_m %>%
+		mutate(
+			bmi_bil_cat_alt = factor(
+				case_when(
+					bmi_m >= 16 & bmi_m < 25 & ala_trans < 50 ~ 1,
+					bmi_m >=25 & tbili < 10 & ala_trans < 50 ~ 2,
+					bmi_m >= 25 & tbili >= 10 & ala_trans < 50 ~ 3,
+					TRUE ~ 9
+				),
+				levels = c(1, 2, 3, 9),
+				labels = c("Normal weights", "Overweight non-GS", "Overweight GS", "????")
+			)
+		)
+	
+	
+	
 	df_f$bmi_wc_bil_cat_oo_rl <- relevel(df_f$bmi_wc_bil_cat_oo, ref= "Overweight non-GS")
 	df_m$bmi_wc_bil_cat_oo_rl <- relevel(df_m$bmi_wc_bil_cat_oo, ref= "Overweight non-GS")
 	
+	df_f$bmi_bil_cat_tert_rl <- relevel(df_f$bmi_bil_cat_tert, ref= "Overweight non-GS")
+	df_m$bmi_bil_cat_tert_rl <- relevel(df_m$bmi_bil_cat_tert, ref= "Overweight non-GS")
+	
+	df_f$bmi_bil_cat_alt_rl <- relevel(df_f$bmi_bil_cat_alt, ref= "Overweight non-GS")
+	df_m$bmi_bil_cat_alt_rl <- relevel(df_m$bmi_bil_cat_alt, ref= "Overweight non-GS")
 	
 	df_f <- droplevels(df_f)
 	df_m <- droplevels(df_m)
@@ -122,14 +199,17 @@ prepare_data <- function(data_file) {
 #functions for analysis----------------------------------------------------------
 
 # Function to run Cox models for each sex cancer outcome.
-run_cox_models <- function(data_list, cancers, exposure_variable, covariates, stratify) {
+run_cox_models <- function(data_list, cancers, exposure_variable, covariates, stratify_list) {
 	results <- list()
 	for (sex in names(data_list)) {
 		data <- data_list[[sex]]
+		
 		cancer_list <- cancers[[sex]]
 		covars <- covariates[[sex]]
+		stratify <- stratify_list[[sex]]
 		
 		for (canc in cancer_list) {
+			
 			
 			# Create the formulas for raw and adjusted models
 			formula_raw <- as.formula(
@@ -180,9 +260,7 @@ extract_summary <- function(model, model_rl, exposure_variable, level_gs, level_
 	coef_summary1 <- suma1$coefficients
 
 	p1 <- coef_summary1[rowname_gs_rl, "Pr(>|z|)"]
-	print(model)
-	print(as.numeric(p1))
-	
+
 	coef_gs <- coef_summary[rowname_gs, c("exp(coef)", "Pr(>|z|)")]
 	coef_non_gs <- coef_summary[rowname_non_gs, c("exp(coef)", "Pr(>|z|)")]
 	conf_gs <- conf_int[rowname_gs, c("lower .95", "upper .95")]
@@ -213,7 +291,7 @@ summarize_models <- function(results, results_rl, exposure_variable, level_gs, l
 																								SIMPLIFY = FALSE)
 	
 	summary_df <- do.call(rbind, summary_list)
-	print(summary_df)
+	
 	#make model column based on rownames
 	summary_df$Model <- row.names(summary_df)
 	summary_df$Model <- substr(summary_df$Model, 1, nchar(summary_df$Model) - 2)
@@ -239,11 +317,51 @@ summarize_models <- function(results, results_rl, exposure_variable, level_gs, l
 		}
 	})
 	
-	
-	print(summary_df$p.difference)
+
 	return(summary_df)
 }
 
+get_lr_interaction <- function(data,exposure, canc, covars, inter, stratify){
+	
+		covars_no_inter <- covars[covars != inter]
+		
+		# Create the right-hand side of the model with interaction
+		rhs_interaction <- paste0(inter, "*", exposure)
+		rhs_covars <- paste(covars_no_inter, collapse = " + ")
+		rhs_strata <- paste("strata(", paste(stratify, collapse = ", "), ")", sep = "")
+		
+		formula_int <- as.formula(
+			paste("Surv(age_rec, age_exit_cancer,", canc, ") ~",
+									paste(c(rhs_interaction, rhs_covars, rhs_strata), collapse = " + "))
+		)
+		
+		# No interaction formula
+		formula_no_int <- as.formula(
+			paste("Surv(age_rec, age_exit_cancer,", canc, ") ~",
+									paste(c(exposure, covars, rhs_strata), collapse = " + "))
+		)
+
+		cox_no_int <- coxph(formula_no_int, data = data)
+		cox_int <- coxph(formula_int, data = data)
+
+		res <- anova(cox_int, cox_no_int, test= "LRT")
+
+		return(res)
+	}
+
+add_cases_to_summary <-function(summary_df, data_list, exposure, level_GS, level_non_GS){
+	
+	for(row in 1:nrow(summary_df)){
+		sex <- summary_df[row, "Sex"]
+		cancer <- summary_df[row, "Cancer"]
+		df <- data_list[[sex]]
+		cases_gs <- sum(df[[cancer]][df[[exposure]] == level_GS])
+		cases_ngs <- sum(df[[cancer]][df[[exposure]] == level_non_GS])
+		
+		summary_df[row, "cases"] <- paste (summary_df[row, "cases"], cases_gs, cases_ngs, sep = " ")
+	}
+	return(summary_df)
+}
 # Function to plot a forest plot for models with at least one significant result
 plot_significant_forest <- function(summary_df) {
 	# Filter to include only adjusted models with at least one significant result
@@ -291,7 +409,6 @@ run_analysis <- function(data_and_cancers_list, exposure_variable, level_gs, lev
 	cancers <- data_and_cancers_list$cancers
 	
 	exposure_rl <- paste0(exposure_variable, "_rl")
-	
 	print("running cox models")
 	# Run the Cox models
 	results <- run_cox_models(data_list, cancers, exposure_variable, covariates, stratify)
@@ -303,9 +420,8 @@ run_analysis <- function(data_and_cancers_list, exposure_variable, level_gs, lev
 	# Extract summary statistics from all models
 	summary_df <- summarize_models(results, results_rl, exposure_variable, level_gs, level_non_gs)
 	
-	print(results)
-	print(results_rl)
-	
+	summary_df <- add_cases_to_summary(summary_df, data_list, exposure_variable, level_gs, level_non_gs)
+
 	summary_df <- summary_df[order(summary_df$Cancer,
 																																summary_df$Sex,
 																																summary_df$Adjustment, 
@@ -326,21 +442,26 @@ run_analysis <- function(data_and_cancers_list, exposure_variable, level_gs, lev
 
 data_and_cancers_list <- prepare_data("working_file.rds") # contains 2 datasets (male and female) as well as the list of cancers for both sexes
 
-covariates_m <- c("height", "alc_stat", "smoke_stat", "pa_min_per_week_MET_sd", "college_degree", "score_diet")
-covariates_f <- c("height", "alc_stat", "smoke_stat", "pa_min_per_week_MET_sd", "college_degree", "score_diet", "ever_hrt")
+covariates_m <- c("height", "alc_stat", "smoke_stat", "pa_min_per_week_MET_sd", "score_diet", "college_degree")
+covariates_f <- c("height", "alc_stat", "smoke_stat", "pa_min_per_week_MET_sd", "score_diet", "college_degree", "ever_hrt")
 
 covariates <- list(Female = covariates_f, Male = covariates_m)
 
-stratify <- c("age_cat", "centre")
+stratify_f <- c("age_cat", "centre")
+stratify_m <- c("age_cat", "centre")
+
+stratify <- list(Female = stratify_f, Male = stratify_m)
 
 # Run the analyses for different exposure_vars.
-results_bil_cat2 <- run_analysis(data_and_cancers_list, exposure_variable = "bmi_bil_cat2", level_gs = "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
-results_bil_cat3 <- run_analysis(data_and_cancers_list, exposure_variable = "bmi_bil_cat_obese", level_gs= "Obese GS", level_non_gs = "Obese non-GS", covariates=covariates, stratify = stratify)
-results_bil_cat1 <- run_analysis(data_and_cancers_list, "bmi_bil_cat", level_gs= "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
+#results_bil_cat2 <- run_analysis(data_and_cancers_list, exposure_variable = "bmi_bil_cat2", level_gs = "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
+#results_bil_cat3 <- run_analysis(data_and_cancers_list, exposure_variable = "bmi_bil_cat_obese", level_gs= "Obese GS", level_non_gs = "Obese non-GS", covariates=covariates, stratify = stratify)
+# results_bil_cat1 <- run_analysis(data_and_cancers_list, "bmi_bil_cat", level_gs= "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
 
-results_bil_catwc <- run_analysis(data_and_cancers_list, exposure_variable = "bmi_wc_bil_cat_oo", level_gs = "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
+#results_bil_catwc <- run_analysis(data_and_cancers_list, exposure_variable = "bmi_wc_bil_cat_oo", level_gs = "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
+results_bil_cat_tert<- run_analysis(data_and_cancers_list, exposure_variable = "bmi_bil_cat_tert", level_gs = "Overweight GS", level_non_gs = "Overweight non-GS", covariates=covariates, stratify = stratify)
 
-summary_df <- results_bil_cat2$summary
+
+summary_df <- results_bil_cat_tert$summary
 summary_df$HR_CI <- paste0(summary_df$exp.coef, " (", summary_df$lower.95, "-", summary_df$upper.95, ")")
 
 summary_df <- summary_df[order(
@@ -352,27 +473,60 @@ summary_df <- summary_df[order(
 summary_df <- summary_df %>%
 	select(Cancer, Sex, cases, Adjustment, Category, everything())
 
-#write.csv(summary_df, file = "../results/summary_cox_wc.csv", row.names=F)
+#write.csv(summary_df, file = "../results/summary_cox_alt_obese.csv", row.names=F)
 
-plot_significant_forest(results_bil_catwc$summary)
+results <- list()
+
+# Counter for results list indexing
+i <- 1
+
+for (sex in c("Male", "Female")) {
+	data <- data_and_cancers_list$data[[sex]]
+	cancers <- data_and_cancers_list$cancers[[sex]]
+	covars <- covariates[[sex]]
+	strat <- stratify[[sex]]
+	
+	for (canc in cancers) {
+		for (inter in covars) {
+			lr <- get_lr_interaction(
+				data = data,
+				covars = covars,
+				inter = inter,
+				canc = canc,
+				exposure = "bmi_bil_cat2",
+				stratify = strat
+			)
+
+			if (!is.null(lr)) {
+				pval <- format(lr$`Pr(>|Chi|)`[2], scientific = FALSE, digits = 4)
+				results[[i]] <- data.frame(
+					sex = sex,
+					cancer = canc,
+					interaction = inter,
+					p_value = pval,
+					stringsAsFactors = FALSE
+				)
+				i <- i + 1
+			}
+		}
+	}
+}
+
+# Combine all rows into a single data frame
+results_df <- do.call(rbind, results)
+
+# Optional: sort by p-value
+results_df <- results_df[order(results_df$sex, results_df$cancer, results_df$p_value), ]
+
+# View result
+print(results_df[results_df$p_value <= 0.05,])
 
 
-results_bil_catwc$summary
 
 
 
-library(car)
-
-cox_model <- results_bil_cat2$models$Female_obesity_cancer_adj
-linearHypothesis(cox_model, "bmi_bil_cat2Overweight GS = bmi_bil_cat2Overweight non-GS")
-
-
-
-
-
-
-# plot_significant_forest(results_bil_cat3$summary)
-# plot_significant_forest(results_bil_cat1$summary)
+plot_significant_forest(results_bil_cat3$summary)
+plot_significant_forest(results_bil_cat1$summary)
 
 ##needed:
 ##test assumptions
@@ -421,48 +575,3 @@ linearHypothesis(cox_model, "bmi_bil_cat2Overweight GS = bmi_bil_cat2Overweight 
 # print(tree_model)
 # plot(tree_model)
 # text(tree_model, use.n = TRUE)
-
-
-
-
-
-# not needed-------------------------------------------------
-# get_lr_interaction <- function(data,canc, covars, stratify){
-# 	
-# 	formula_no_int <- as.formula(
-# 		paste("Surv(age_rec, age_exit_cancer,", canc, ") ~ bmi_cat + tbili +", 
-# 								paste(covars, collapse = " + "), 
-# 								paste("+ strata(", paste(stratify, collapse = ", "), ")", sep = "")
-# 		))
-# 	
-# 	formula_int <- as.formula(
-# 		paste("Surv(age_rec, age_exit_cancer,", canc, ") ~ bmi_cat * tbili +", 
-# 								paste(covars, collapse = " + "), 
-# 								paste("+ strata(", paste(stratify, collapse = ", "), ")", sep = "")
-# 		))
-# 	
-# 	cox_no_int <- coxph(formula_no_int, data = data)
-# 	cox_int <- coxph(formula_int, data = data)
-# 	
-# 	res <- anova(cox_int, cox_no_int, test= "LRT")
-# 	
-# 	return(res)
-# }
-
-
-
-#summary_df$pint <- NA
-
-# print("Processing interactions")
-# for (sex in names(data_list)) {
-# 	data <- data_list[[sex]]
-# 	cancer_list <- cancers[[sex]]
-# 	covars <- covariates[[sex]]
-# 	
-# # 	for (canc in cancer_list) {
-# # 	 res <- get_lr_interaction(data,canc, covars, stratify)
-# # 	 p_inter <-res$`Pr(>|Chi|)`[2]
-# # 	 model_name <- paste0(sex, "_", canc, "_adj")
-# # 	 summary_df$pint[summary_df$Model == model_name] <- as.numeric(p_inter)
-# # 	}
-# # }
